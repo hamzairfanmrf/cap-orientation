@@ -1,0 +1,9 @@
+{
+  "name": "orientation",
+  "version": "1.0.0",
+  "type": "module",
+  "private": true,
+  "description": "Plateforme d'orientation universitaire (MVP)",
+  "scripts": { "start": "node --env-file-if-exists=.env server.js", "dev": "node --env-file-if-exists=.env --watch server.js", "test": "node --test" },
+  "engines": { "node": ">=22.5" }
+}
