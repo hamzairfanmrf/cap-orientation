@@ -59,6 +59,8 @@ if (!db.prepare(`SELECT 1 FROM users WHERE role='admin'`).get()) {
   console.log(`[setup] Compte admin créé : ${email} / ${pw}  (changez-le !)`);
 }
 
+// Derrière un proxy (Cloudflare, Render, Caddy…), TRUST_PROXY=1 pour utiliser la vraie IP du client.
+const clientIp = req => (process.env.TRUST_PROXY ? (req.headers['cf-connecting-ip'] || String(req.headers['x-forwarded-for'] || '').split(',')[0].trim()) : '') || req.socket.remoteAddress;
 const hits = new Map(); // limitation anti force brute
 function rateLimit(key, max, windowMs) {
   const now = Date.now(); const arr = (hits.get(key) || []).filter(t => now - t < windowMs);
@@ -137,7 +139,7 @@ const can = (u, role) => role === 'any' || (u && (role === 'user' || u.role === 
 
 // Auth
 r('POST', '/api/auth/register', 'any', async ({ req, b }) => {
-  if (!rateLimit('reg:' + req.socket.remoteAddress, 10, 36e5)) fail(429, 'too_many');
+  if (!rateLimit('reg:' + clientIp(req), 10, 36e5)) fail(429, 'too_many');
   const email = cleanEmail(b.email), pw = cleanPw(b.password);
   if (!b.consent) fail(400, 'consent_required');
   if (b.minor && !b.parentConsent) fail(400, 'parent_consent_required');
@@ -159,7 +161,7 @@ r('GET', '/api/config', 'any', () => ({ data: { oidc: oidcConfigured() ? { name:
 const OIDC_REDIRECT = () => `${BASE_URL}/api/auth/oidc/callback`;
 r('GET', '/api/auth/oidc/start', 'any', async ({ req }) => {
   if (!oidcConfigured()) fail(404, 'oidc_disabled');
-  if (!rateLimit('oidc:' + req.socket.remoteAddress, 30, 6e5)) fail(429, 'too_many');
+  if (!rateLimit('oidc:' + clientIp(req), 30, 6e5)) fail(429, 'too_many');
   const s = await oidcStart(OIDC_REDIRECT());
   db.prepare('DELETE FROM oauth_states WHERE created<?').run(Date.now() - 6e5);
   db.prepare('INSERT INTO oauth_states VALUES(?,?,?,?)').run(s.state, s.nonce, s.verifier, Date.now());
@@ -192,7 +194,7 @@ r('GET', '/api/auth/verify', 'any', ({ url }) => {
 });
 r('POST', '/api/auth/login', 'any', async ({ req, b }) => {
   const email = cleanEmail(b.email);
-  if (!rateLimit('login:' + req.socket.remoteAddress + email, 8, 15 * 6e4)) fail(429, 'too_many');
+  if (!rateLimit('login:' + clientIp(req) + email, 8, 15 * 6e4)) fail(429, 'too_many');
   const u = db.prepare('SELECT * FROM users WHERE email=?').get(email);
   if (!u || !checkPw(String(b.password || ''), u.pass)) fail(401, 'bad_credentials');
   if (u.blocked) fail(403, 'blocked');
@@ -204,7 +206,7 @@ r('POST', '/api/auth/logout', 'any', ({ req }) => {
   return { data: { ok: true }, headers: { 'Set-Cookie': sessionCookie('', 0) } };
 });
 r('POST', '/api/auth/forgot', 'any', ({ req, b }) => {
-  if (!rateLimit('forgot:' + req.socket.remoteAddress, 5, 36e5)) fail(429, 'too_many');
+  if (!rateLimit('forgot:' + clientIp(req), 5, 36e5)) fail(429, 'too_many');
   const u = db.prepare('SELECT id,email,profile FROM users WHERE email=?').get(cleanEmail(b.email)); let link;
   if (u) { const t = tok(); db.prepare('INSERT INTO tokens VALUES(?,?,?,?)').run(t, u.id, 'reset', Date.now()); link = `${BASE_URL}/#/reset/${t}`; mail(u, 'reset', link); }
   return { data: { ok: true, devLink: DEV && !mailConfigured() ? link : undefined } }; // même réponse que l'e-mail existe ou non
@@ -323,7 +325,7 @@ r('POST', '/api/feedback', 'user', ({ user, b }) => {
   return { status: 201, data: { ok: true } };
 });
 r('POST', '/api/contact', 'any', ({ req, b }) => {
-  if (!rateLimit('contact:' + req.socket.remoteAddress, 5, 36e5)) fail(429, 'too_many');
+  if (!rateLimit('contact:' + clientIp(req), 5, 36e5)) fail(429, 'too_many');
   if (!b.body) fail(400, 'empty');
   db.prepare('INSERT INTO messages(name,email,body) VALUES(?,?,?)').run(str(b.name, 100), str(b.email, 200), str(b.body, 5000));
   return { status: 201, data: { ok: true } };
